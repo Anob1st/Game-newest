@@ -3,21 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Multiplayer Drawing Game</title>
+<title>Multiplayer Drawing Game - Lobby</title>
 <style>
-  body { font-family: Arial; display: flex; flex-direction: column; align-items: center; background:#f0f0f0; margin:0; padding:20px;}
-  h1 { margin-bottom: 10px;}
-  #avatars { display: flex; gap: 10px; margin-bottom: 20px;}
-  .avatar { border:2px solid gray; border-radius:50%; width:60px; height:60px; cursor:pointer; transition:0.2s;}
-  .avatar.selected { border:3px solid #00f; }
-  input[name="playerName"] { padding:5px; font-size:16px; margin-bottom:20px;}
-  button { padding:10px 20px; margin:5px; font-size:16px; cursor:pointer;}
+  body { font-family: Arial; margin:0; padding:0; display:flex; flex-direction:column; align-items:center; background:#f0f0f0;}
+  h1 { margin:20px 0;}
+  #avatars { display:flex; gap:10px; margin-bottom:20px;}
+  .avatar { border:2px solid gray; border-radius:50%; width:70px; height:70px; cursor:pointer; transition:0.2s;}
+  .avatar.selected { border:3px solid #007bff;}
+  #inputs { display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:20px;}
+  input[type=text] { padding:5px 10px; font-size:16px;}
+  input[type=text]:focus { outline:2px solid #007bff;}
+  button { padding:10px 20px; font-size:16px; margin:5px; cursor:pointer; background:#007bff; color:white; border:none; border-radius:5px; transition:0.2s;}
+  button:hover { background:#0056b3;}
 </style>
 </head>
 <body>
-
 <h1>Multiplayer Drawing Game</h1>
-<input type="text" id="playerName" placeholder="Enter your name" />
+
+<div id="inputs">
+  <input type="text" id="playerName" placeholder="Enter your name">
+  <input type="text" id="joinCode" placeholder="Room code (for joining)">
+</div>
 
 <div id="avatars">
   <img src="avatar1.png" class="avatar" data-avatar="avatar1.png">
@@ -27,71 +33,80 @@
   <img src="avatar5.png" class="avatar" data-avatar="avatar5.png">
 </div>
 
-<button onclick="createRoom()">Create Room</button>
-<input type="text" id="joinCode" placeholder="Enter Room Code">
-<button onclick="joinRoom()">Join Room</button>
+<div id="buttons">
+  <button id="createBtn">Create Room</button>
+  <button id="joinBtn">Join Room</button>
+</div>
 
 <script type="module">
-  // Firebase setup
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-  import { getFirestore, doc, setDoc, getDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyDyOnvm0qMvREjKgn12gN5QEml_AmodiRo",
-    authDomain: "oooooo-ca089.firebaseapp.com",
-    projectId: "oooooo-ca089",
-    storageBucket: "oooooo-ca089.firebasestorage.app",
-    messagingSenderId: "351774678518",
-    appId: "1:351774678518:web:18511398dec45ece047bd7"
-  };
+// ---------------- Firebase config ----------------
+const firebaseConfig = {
+  apiKey: "AIzaSyDyOnvm0qMvREjKgn12gN5QEml_AmodiRo",
+  authDomain: "oooooo-ca089.firebaseapp.com",
+  projectId: "oooooo-ca089",
+  storageBucket: "oooooo-ca089.firebasestorage.app",
+  messagingSenderId: "351774678518",
+  appId: "1:351774678518:web:18511398dec45ece047bd7"
+};
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-  let selectedAvatar = null;
-  document.querySelectorAll('.avatar').forEach(img => {
-    img.addEventListener('click', () => {
-      document.querySelectorAll('.avatar').forEach(a=>a.classList.remove('selected'));
-      img.classList.add('selected');
-      selectedAvatar = img.dataset.avatar;
-    });
+// ---------------- Avatar selection ----------------
+let selectedAvatar = null;
+document.querySelectorAll('.avatar').forEach(img=>{
+  img.addEventListener('click', ()=>{
+    document.querySelectorAll('.avatar').forEach(a=>a.classList.remove('selected'));
+    img.classList.add('selected');
+    selectedAvatar = img.dataset.avatar;
+  });
+});
+
+// ---------------- Functions ----------------
+window.createRoom = async function(){
+  const name = document.getElementById("playerName").value.trim();
+  if(!name || !selectedAvatar){ alert("Choose name and avatar"); return; }
+
+  const roomCode = Math.random().toString(36).substr(2,5).toUpperCase();
+  localStorage.setItem("playerName", name);
+  localStorage.setItem("avatar", selectedAvatar);
+  localStorage.setItem("roomCode", roomCode);
+
+  await setDoc(doc(db,"rooms",roomCode),{
+    players:[{name, avatar:selectedAvatar}],
+    strokes: [],
+    chat: []
   });
 
-  function createRoom() {
-    const name = document.getElementById("playerName").value.trim();
-    if (!name || !selectedAvatar) { alert("Choose name and avatar"); return; }
+  window.location.href = "game.html";
+}
 
-    const roomCode = Math.random().toString(36).substr(2,5).toUpperCase();
-    localStorage.setItem("playerName", name);
-    localStorage.setItem("avatar", selectedAvatar);
-    localStorage.setItem("roomCode", roomCode);
+window.joinRoom = async function(){
+  const code = document.getElementById("joinCode").value.trim().toUpperCase();
+  const name = document.getElementById("playerName").value.trim();
+  if(!name || !selectedAvatar || !code){ alert("Fill all fields"); return; }
 
-    // create room in Firestore
-    setDoc(doc(db,"rooms",roomCode),{
-      players: [{name, avatar:selectedAvatar}]
-    }).then(()=>{
-      window.location.href="game.html";
-    }).catch(e=>alert("Firebase error: "+e));
-  }
+  const roomRef = doc(db,"rooms",code);
+  const roomSnap = await getDoc(roomRef);
+  if(!roomSnap.exists()){ alert("Room not found"); return; }
 
-  async function joinRoom() {
-    const code = document.getElementById("joinCode").value.trim().toUpperCase();
-    const name = document.getElementById("playerName").value.trim();
-    if (!name || !selectedAvatar || !code) { alert("Fill all fields"); return; }
+  await updateDoc(roomRef,{
+    players: arrayUnion({name, avatar:selectedAvatar})
+  });
 
-    const roomRef = doc(db,"rooms",code);
-    const roomSnap = await getDoc(roomRef);
-    if (!roomSnap.exists()) { alert("Room not found"); return; }
+  localStorage.setItem("playerName", name);
+  localStorage.setItem("avatar", selectedAvatar);
+  localStorage.setItem("roomCode", code);
 
-    await updateDoc(roomRef,{
-      players: arrayUnion({name, avatar:selectedAvatar})
-    });
+  window.location.href = "game.html";
+}
 
-    localStorage.setItem("playerName", name);
-    localStorage.setItem("avatar", selectedAvatar);
-    localStorage.setItem("roomCode", code);
-    window.location.href="game.html";
-  }
+// ---------------- Buttons ----------------
+document.getElementById("createBtn").addEventListener("click", createRoom);
+document.getElementById("joinBtn").addEventListener("click", joinRoom);
 
 </script>
 </body>
