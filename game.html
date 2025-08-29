@@ -20,6 +20,7 @@ button:hover { background:#0056b3;}
 #chat input { flex:1; padding:5px;}
 #gameInfo { margin-top:10px; }
 #roomCodeDisplay { margin-top:5px; font-weight:bold;}
+#wordSelection { margin-top:10px; display:flex; gap:5px; flex-wrap:wrap; justify-content:center; }
 </style>
 </head>
 <body>
@@ -37,6 +38,8 @@ button:hover { background:#0056b3;}
   <input type="range" id="brush" min="1" max="15" value="3">
 </div>
 
+<div id="wordSelection"></div>
+
 <div id="gameInfo">
   <span id="timer">Timer: 60</span> | 
   <span id="currentWord">Word: ?</span>
@@ -51,9 +54,9 @@ button:hover { background:#0056b3;}
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-import { getFirestore, doc, onSnapshot, updateDoc, arrayUnion, arrayRemove, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, updateDoc, arrayUnion, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
-// -------- Firebase --------
+// ---------- Firebase ----------
 const firebaseConfig = {
   apiKey: "AIzaSyDyOnvm0qMvREjKgn12gN5QEml_AmodiRo",
   authDomain: "oooooo-ca089.firebaseapp.com",
@@ -65,40 +68,64 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// -------- Player info --------
+// ---------- Player info ----------
 const playerName = localStorage.getItem("playerName");
 const avatar = localStorage.getItem("avatar");
 const roomCode = localStorage.getItem("roomCode");
 if(!playerName || !avatar || !roomCode){ window.location.href="index.html"; }
 document.getElementById("roomCodeDisplay").textContent = "Room Code: " + roomCode;
-
 const roomRef = doc(db,"rooms",roomCode);
 
-// -------- Players UI --------
+// ---------- Players UI ----------
 const playersDiv = document.getElementById("players");
 let playersList = [];
 
-onSnapshot(roomRef, snap=>{
-  const data = snap.data();
-  if(!data) return;
-  if(data.players){
+onSnapshot(roomRef, async snap=>{
+    const data = snap.data();
+    if(!data) return;
+
     playersList = data.players;
     playersDiv.innerHTML = "";
     data.players.forEach((p,i)=>{
-      const div = document.createElement("div");
-      div.className = "player";
-      if(data.currentTurnIndex === i) div.classList.add("turn");
-      div.innerHTML = `<img src="${p.avatar}"><span>${p.name}</span>`;
-      playersDiv.appendChild(div);
+        const div = document.createElement("div");
+        div.className = "player";
+        if(data.currentTurnIndex === i) div.classList.add("turn");
+        div.innerHTML = `<img src="${p.avatar}"><span>${p.name}</span>`;
+        playersDiv.appendChild(div);
     });
+
     const myIndex = playersList.findIndex(p=>p.name===playerName);
-    // Show word only for current turn
+
+    // ---------- Word selection ----------
+    const wordDiv = document.getElementById("wordSelection");
+    if(data.currentTurnIndex === myIndex && !data.currentWordSelected){
+        wordDiv.innerHTML = '';
+        data.wordList.forEach(word=>{
+            const btn = document.createElement('button');
+            btn.textContent = word;
+            btn.onclick = async ()=>{
+                await updateDoc(roomRef,{
+                    currentWord: word,
+                    currentWordSelected: true,
+                    timer:60
+                });
+                wordDiv.innerHTML='';
+            };
+            wordDiv.appendChild(btn);
+        });
+    } else {
+        wordDiv.innerHTML='';
+    }
+
+    // Show word only for current drawing player
     document.getElementById("currentWord").textContent = "Word: " + (data.currentTurnIndex===myIndex ? data.currentWord : "?");
     document.getElementById("timer").textContent = "Timer: " + (data.timer || 60);
-  }
+
+    // Enable drawing only for current player
+    drawingEnabled = (data.currentTurnIndex===myIndex && data.currentWordSelected);
 });
 
-// -------- Canvas --------
+// ---------- Canvas ----------
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 let drawing=false,lastX=0,lastY=0;
@@ -116,109 +143,111 @@ canvas.addEventListener("mouseout", e=>drawing=false);
 canvas.addEventListener("mousemove", draw);
 
 function draw(e){
-  if(!drawing || !drawingEnabled) return;
-  const dx = e.offsetX - lastX;
-  const dy = e.offsetY - lastY;
-  const dist = Math.sqrt(dx*dx+dy*dy);
-  const size = brushSize * (dist<1?1:dist/5); // slight pressure
-  ctx.strokeStyle = brushColor;
-  ctx.lineWidth = size;
-  ctx.lineCap="round";
-  ctx.beginPath();
-  ctx.moveTo(lastX,lastY);
-  ctx.lineTo(e.offsetX,e.offsetY);
-  ctx.stroke();
-  strokes.push({x1:lastX,y1:lastY,x2:e.offsetX,y2:e.offsetY,color:brushColor,size:size,player:playerName});
-  lastX=e.offsetX; lastY=e.offsetY;
-  syncStrokes();
+    if(!drawing || !drawingEnabled) return;
+    const dx = e.offsetX - lastX;
+    const dy = e.offsetY - lastY;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    const size = brushSize * (dist<1?1:dist/5);
+    ctx.strokeStyle = brushColor;
+    ctx.lineWidth = size;
+    ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(lastX,lastY);
+    ctx.lineTo(e.offsetX,e.offsetY);
+    ctx.stroke();
+    strokes.push({x1:lastX,y1:lastY,x2:e.offsetX,y2:e.offsetY,color:brushColor,size:size,player:playerName});
+    lastX=e.offsetX; lastY=e.offsetY;
+    syncStrokes();
 }
 
-// -------- Undo / Clear --------
+// ---------- Undo / Clear ----------
 document.getElementById("undo").addEventListener("click", ()=>{
-  if(strokes.length===0) return;
-  let index = strokes.map(s=>s.player).lastIndexOf(playerName);
-  if(index>=0){ strokes.splice(index,1); redrawCanvas(); syncStrokes(); }
+    if(strokes.length===0) return;
+    let index = strokes.map(s=>s.player).lastIndexOf(playerName);
+    if(index>=0){ strokes.splice(index,1); redrawCanvas(); syncStrokes(); }
 });
-
 document.getElementById("clear").addEventListener("click", ()=>{
-  strokes=[]; redrawCanvas(); syncStrokes();
+    strokes=[]; redrawCanvas(); syncStrokes();
 });
 
 function redrawCanvas(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  strokes.forEach(s=>{
-    ctx.strokeStyle=s.color;
-    ctx.lineWidth=s.size;
-    ctx.beginPath();
-    ctx.moveTo(s.x1,s.y1);
-    ctx.lineTo(s.x2,s.y2);
-    ctx.stroke();
-  });
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    strokes.forEach(s=>{
+        ctx.strokeStyle=s.color;
+        ctx.lineWidth=s.size;
+        ctx.beginPath();
+        ctx.moveTo(s.x1,s.y1);
+        ctx.lineTo(s.x2,s.y2);
+        ctx.stroke();
+    });
 }
 
-// -------- Sync strokes --------
+// ---------- Sync strokes ----------
 async function syncStrokes(){
-  await updateDoc(roomRef,{strokes:strokes});
+    await updateDoc(roomRef,{strokes:strokes});
 }
 
 onSnapshot(roomRef, snap=>{
-  const data = snap.data();
-  if(!data) return;
-  if(data.strokes){
-    strokes = data.strokes;
-    redrawCanvas();
-  }
-  const myIndex = playersList.findIndex(p=>p.name===playerName);
-  drawingEnabled = (data.currentTurnIndex === myIndex);
+    const data = snap.data();
+    if(!data) return;
+    if(data.strokes){
+        strokes = data.strokes;
+        redrawCanvas();
+    }
 });
 
-// -------- Chat --------
+// ---------- Chat ----------
 const chatMessages = document.getElementById("chatMessages");
 document.getElementById("sendChat").addEventListener("click", async ()=>{
-  const msg = document.getElementById("chatInput").value.trim();
-  if(!msg) return;
-  document.getElementById("chatInput").value="";
-  await updateDoc(roomRef,{ chat: arrayUnion({player:playerName,message:msg,time:Date.now()}) });
+    const msg = document.getElementById("chatInput").value.trim();
+    if(!msg) return;
+    document.getElementById("chatInput").value="";
+    await updateDoc(roomRef,{ chat: arrayUnion({player:playerName,message:msg,time:Date.now()}) });
 });
 
 onSnapshot(roomRef, snap=>{
-  const data = snap.data();
-  if(data && data.chat){
-    chatMessages.innerHTML = "";
-    data.chat.forEach(c=>{
-      const div = document.createElement("div");
-      div.textContent = c.player + ": " + c.message;
-      chatMessages.appendChild(div);
-    });
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
+    const data = snap.data();
+    if(data && data.chat){
+        chatMessages.innerHTML = "";
+        data.chat.forEach(c=>{
+            const div = document.createElement("div");
+            div.textContent = c.player + ": " + c.message;
+            chatMessages.appendChild(div);
+        });
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
 });
 
-// -------- Timer / Turn --------
+// ---------- Timer / Turn ----------
 let timerInterval;
 onSnapshot(roomRef, snap=>{
-  const data = snap.data();
-  if(!data) return;
-  const myIndex = playersList.findIndex(p=>p.name===playerName);
-  drawingEnabled = (data.currentTurnIndex === myIndex);
-  if(drawingEnabled && !timerInterval){
-    let t = data.timer || 60;
-    timerInterval = setInterval(async ()=>{
-      t--;
-      document.getElementById("timer").textContent = "Timer: "+t;
-      await updateDoc(roomRef,{timer:t});
-      if(t<=0){ clearInterval(timerInterval); timerInterval=null; nextTurn(); }
-    },1000);
-  }
+    const data = snap.data();
+    if(!data) return;
+    const myIndex = playersList.findIndex(p=>p.name===playerName);
+    drawingEnabled = (data.currentTurnIndex === myIndex && data.currentWordSelected);
+    
+    if(drawingEnabled && !timerInterval){
+        let t = data.timer || 60;
+        timerInterval = setInterval(async ()=>{
+            t--;
+            document.getElementById("timer").textContent = "Timer: "+t;
+            await updateDoc(roomRef,{timer:t});
+            if(t<=0){ clearInterval(timerInterval); timerInterval=null; nextTurn(); }
+        },1000);
+    }
 });
 
 async function nextTurn(){
-  const snap = await getDoc(roomRef);
-  if(!snap.exists()) return;
-  let data = snap.data();
-  let nextIndex = (data.currentTurnIndex+1) % data.players.length;
-  const newWord = data.wordList[Math.floor(Math.random()*data.wordList.length)];
-  await updateDoc(roomRef,{ currentTurnIndex: nextIndex, timer:60, currentWord: newWord });
+    const snap = await getDoc(roomRef);
+    if(!snap.exists()) return;
+    let data = snap.data();
+    let nextIndex = (data.currentTurnIndex+1) % data.players.length;
+    await updateDoc(roomRef,{
+        currentTurnIndex: nextIndex,
+        timer:60,
+        currentWord:"",
+        currentWordSelected:false
+    });
 }
 </script>
 </body>
